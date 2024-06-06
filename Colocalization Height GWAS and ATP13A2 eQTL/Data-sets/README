@@ -1,0 +1,2 @@
+Para correr los análisis es necesario descomprimir los archivos con extensión “.vcf.gz”. 
+Se puede realizar por medio de la terminal con el programa “gunzip” o con cualquier otro programa para ese fin. 
