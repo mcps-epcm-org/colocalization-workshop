@@ -47,3 +47,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Large data sets
+Colocalization Height GWAS and ATP13A2 eQTL/Data/

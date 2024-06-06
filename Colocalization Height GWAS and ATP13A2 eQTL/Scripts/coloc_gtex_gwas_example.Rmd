@@ -1,0 +1,463 @@
+---
+title: "Colocalization of Height GWAS Locus and ATP13A2 eQTL"
+author: "Misa Graff"
+date: "`r format(Sys.time(), '%B %d, %Y, %R')`"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Remove everything from workspace
+
+```{r}
+rm(list=ls(all=TRUE))
+
+```
+Install packages if not previously installed this only loads them
+
+```{r library, message=FALSE}
+#install.packages(coloc)
+#install.packa ges(Rfast)
+
+library(coloc)  
+library(Rfast)
+```
+########################################
+# 1. Reading and preparting the input  #
+########################################
+This R script runs coloc, expected arguments are:
+- GWAS file 1 here assumed to be eQTLs for a transcript
+- GWAS file 2 summary statistics from a GWAS
+- trait1 could be the gene name
+- trait2 would be the phenotype of the GWAS
+
+unncomment and add in arguments in a separate files
+```{r}
+#args = commandArgs(trailingOnly=TRUE) 
+#print(args)
+#file1 = args[1]
+#file2 = args[2]
+#trait1 = args[3]
+#trait2 = args[4]
+```
+
+Here we will just do one as an example and will define here.
+- Example 
+```{r}
+file1 = "ENSG00000159363.17.GTEx.eqtl.txt"
+file2 = "Height_HIS.GWAS.ENSG00000159363.coloc.input"
+trait1 = "ENSG00000159363"
+trait2 = "height"
+```
+
+Set working directory
+
+```{r}
+setwd("/proj/epi/CVDGeneNas/migraff/coloc")
+```
+
+Read  in summary stats for region from gwas1/eqtls
+```{r}
+eqtl = read.table(file1, header=T, stringsAsFactors=F)
+```
+
+Read in summary stats for region from gwas2
+```{r}
+gwas = read.table(file2, header=T, stringsAsFactors=F)
+```
+
+Assign row names to be the column to match on, these should be unique. 
+```{r}
+rownames(eqtl) = eqtl$rsID
+rownames(gwas) = gwas$MarkerName
+```
+
+Mmake sure there are significant GWAS variants
+```{r}
+
+sig = 'none'
+#is there a suggestive signal in GWAS2?
+if(dim(gwas[which(gwas$p_value<1e-5),])[1]>0){
+        sig = 'sugg'}
+#is there a significant signal in GWAS2?
+if(dim(gwas[which(gwas$p_value<5e-8),])[1]>0){
+        sig = 'gsig'}
+
+table(sig)
+
+```
+
+Create a list of markers names (here rsids) that are also in the gwas file 
+Then only keep variants with a valid p-value
+```{r}
+eqtl = eqtl[ gwas$MarkerName, ]
+eqtl = eqtl[ which(!is.na(eqtl$pval_asc)), ]
+```
+
+Look at files so far
+```{r}
+print(head(eqtl))
+print(head(gwas))
+```
+
+##########################################################
+# 2. Output files needed for plink. Format and QC them.	 #
+##########################################################		
+
+Output 2 files: one file with the name and reference allele 
+Output a second file with name only
+
+```{r}
+system('mkdir LD')
+write.table(eqtl[,c('rsID','REF')], paste0('LD/',trait1,'.SNP.REF.txt'), col.names=F, row.names=F, sep='\t', quote=F)
+write.table(eqtl[,c('rsID')], paste0('LD/',trait1,'.SNP.extract'), col.names=F, row.names=F, sep='\t', quote=F)
+```
+
+Rrun plink to get LD, here from 1KG.AMR and EUR, using the files you just made 
+```{r}
+CHR="chr1"
+system(paste0('plink --vcf 1KG.AMR.GRCH38.rsID.',CHR,'.region.vcf.gz --extract LD/',trait1,'.SNP.extract --threads 1 --update-ref-allele LD/',trait1,'.SNP.REF.txt 2 1 --r square --out LD/AMR',trait1,'.LD --make-just-bim'))
+
+system(paste0('plink --vcf 1KG.EUR.GRCH38.rsID.',CHR,'.region.vcf.gz --extract LD/',trait1,'.SNP.extract --threads 1 --update-ref-allele LD/',trait1,'.SNP.REF.txt 2 1 --r square --out LD/EUR',trait1,'.LD --make-just-bim'))
+```
+
+Read in the resulting plink bim files.
+(These files list the variants, their positions and alleles).
+```{r}
+amrbim = read.table(paste0('LD/AMR',trait1,'.LD.bim'), header=F)
+eurbim = read.table(paste0('LD/EUR',trait1,'.LD.bim'), header=F)
+```
+
+Give them column names
+```{r}
+colnames(amrbim) = c("chr","rsid","cM","position","allele1","allele2")
+colnames(eurbim) = c("chr","rsid","cM","position","allele1","allele2")
+```
+
+#The LD for AMR has a few more variants. 
+```{r}
+dim(amrbim)
+#[1] 3682    6
+dim(eurbim)
+#[1] 3677    6
+```
+
+Read in the LD matrix (all numeric); make sure none are NA
+```{r}
+ldamr = as.matrix(read.table(paste0('LD/AMR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+ldeur = as.matrix(read.table(paste0('LD/EUR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+```
+
+Give the row and column names of this matrix the rsIDs
+```{r}
+colnames(ldamr) = amrbim[,2]
+rownames(ldamr) = amrbim[,2]
+colnames(ldeur) = eurbim[,2]
+rownames(ldeur) = eurbim[,2]
+```
+
+Check for missing data; 
+LD matrices can't have mising values and need to be the same size
+```{r}
+miss.amr<- colSums(is.na(ldamr))
+miss.eur<- colSums(is.na(ldeur))
+max(miss.eur)
+min(miss.eur)
+max(miss.amr)
+min(miss.amr)
+```
+
+Check for columns with any missing
+Could be one snp is the cuprit
+```{r}
+colnames(ldamr)[colSums(is.na(ldamr)) > 0]
+colnames(ldeur)[colSums(is.na(ldeur)) > 0]
+colnames(ldeur)[colSums(is.na(ldeur)) > 10]
+# rs78116095
+```
+
+Remove this snp from the eurbim:
+```{r}
+eurbim <- eurbim[!eurbim$rsid=="rs78116095",]
+dim(eurbim)
+#[1] 3676    6
+```
+
+Both LD matrices need ot match, so remake AMR to match EUR variants.
+Output a file with the name and reference allele (overwrite former files)
+```{r}
+write.table(eurbim[,c(2,5)], paste0('LD/',trait1,'.SNP.REF.txt'), col.names=F, row.names=F, sep='\t', quote=F)
+```
+## write a table with just names 
+```{r}
+write.table(eurbim[,2], paste0('LD/',trait1,'.SNP.extract'), col.names=F, row.names=F, sep='\t', quote=F)
+```
+
+Run plink to get LD, here from 1KG.AMR and EUR, using the updated plink files 
+```{r}
+CHR="chr1"
+system(paste0('plink --vcf 1KG.AMR.GRCH38.rsID.',CHR,'.region.vcf.gz --extract LD/',trait1,'.SNP.extract --threads 1 --update-ref-allele LD/',trait1,'.SNP.REF.txt 2 1 --r square --out LD/AMR',trait1,'.LD --make-just-bim'))
+
+system(paste0('plink --vcf 1KG.EUR.GRCH38.rsID.',CHR,'.region.vcf.gz --extract LD/',trait1,'.SNP.extract --threads 1 --update-ref-allele LD/',trait1,'.SNP.REF.txt 2 1 --r square --out LD/EUR',trait1,'.LD --make-just-bim'))
+```
+
+Read in the resulting plink bim files
+```{r}
+amrbim = read.table(paste0('LD/AMR',trait1,'.LD.bim'), header=F)
+eurbim = read.table(paste0('LD/EUR',trait1,'.LD.bim'), header=F)
+```
+
+Give them column names
+```{r}
+colnames(amrbim) = c("chr","rsid","cM","position","allele1","allele2")
+colnames(eurbim) = c("chr","rsid","cM","position","allele1","allele2")
+```
+
+The LD for AMR and EUR have the same number of variants. 
+```{r}
+dim(amrbim)
+```
+#[1] 3676    6
+```{r}
+dim(eurbim)
+```
+#[1] 3676    6
+
+
+Create a list of markers names (here rsids) that are in AMR and EUR bim files 
+```{r}
+eqtl = eqtl[ eurbim$rsid, ]
+gwas = gwas[ amrbim$rsid, ]
+```
+
+Check files; all rows across all files must match
+Columns and rows in LD files much match
+
+```{r}
+dim(gwas)
+dim(eqtl)
+
+#[1] 3676   12
+#[1] 3676   13
+
+
+dim(amrbim)
+dim(eurbim)
+#[1] 3676    6
+#[1] 3676    6
+```
+
+Read in the LD matrix (all numeric)
+```{r}
+ldamr = as.matrix(read.table(paste0('LD/AMR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+ldeur = as.matrix(read.table(paste0('LD/EUR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+```
+Give the row and column names of this matrix the rsIDs
+```{r}
+colnames(ldamr) = amrbim[,2]
+rownames(ldamr) = amrbim[,2]
+colnames(ldeur) = eurbim[,2]
+rownames(ldeur) = eurbim[,2]
+```
+
+Check for columns with any missing again
+```{r}
+colnames(ldamr)[colSums(is.na(ldamr)) > 0]
+colnames(ldeur)[colSums(is.na(ldeur)) > 0]
+```
+
+########################################################################
+# 3. Form the required input datasets that focus on comparing p-values #
+########################################################################
+
+[^1}: Make the list of required elements for trait1 and file1 (eQTL)
+[^2}: Make the list of required elements for trait2 and file2 (GWAS)
+- MAF-- should be effect allele
+- pvalues
+- snp-- marker name shared across two dataasets
+- position
+- type 'quant' for continuous traits 'cc' for case control
+- N-- sample size
+- s-- fraction that are sample that are cases (only needed if cc; we are using a quantitive trait here so will not include this)
+
+```{r}
+eqtl.d = list(pvalues = eqtl[eurbim$rsid, 'pval_asc'],snp = eqtl[eurbim$rsid, 'rsID'], MAF = eqtl[eurbim$rsid, 'maf_trc'], position = eurbim$position, type='quant', N = eqtl$samples_asc[1])
+gwas.d = list(pvalues = gwas[amrbim$rsid,'p_value'], snp = gwas[ amrbim$rsid, 'MarkerName'], MAF = gwas[amrbim$rsid, 'EAF'], position = amrbim$position, type='quant', N = 50000)
+```
+
+Check that datasets are ok; results will="NULL" if all if ok
+```{r}
+check_dataset(eqtl.d,req=c("snp","pvalues"))
+check_dataset(gwas.d,req=c("snp","pvalues"))
+```
+
+##############################################################################
+# 4. Form the required datasets instead that focus on comparing beta varbeta #
+**note allele alignment**                               
+##############################################################################
+
+For this input, we need variance, calculate from se of beta
+```{r}
+eqtl$varbeta=eqtl$beta_se_asc^2
+gwas$varbeta=gwas$se_0^2
+```
+
+[^1}: Make the list of required elements for trait1 and file1 (eQTL)
+[^2}: Make the list of required elements for trait2 and file2 (GWAS)
+- beta
+- varbeta -- variance of beta = (SE of beta)^2
+- snp-- marker name shared across two dataasets
+- position
+- type 'quant' for continuous traits 'cc' for case control
+- N -- sample size
+- MAF-- effect allele frequency
+- LD-- ld matrix (not used)
+- sdY-- the standard deviation of Y
+
+```{r}
+eqtl.d2 = list ( snp = eqtl[eurbim$rsid, 'rsID'], beta = eqtl[eurbim$rsid,'beta_asc'], varbeta=eqtl[eurbim$rsid,'varbeta'], position = eurbim$position, type = 'quant', N = eqtl$samples_asc[1], LD = ldeur, sdY=1, MAF = eqtl[eurbim$rsid, 'maf_trc'])
+
+gwas.d2 = list (snp = gwas[amrbim$rsid, 'MarkerName'], beta = gwas[amrbim$rsid,'beta_0'], varbeta=gwas[amrbim$rsid,'varbeta'], position =amrbim$position, type = 'quant', N = 50000, LD = ldamr, sdY=1, MAF = gwas[amrbim$rsid, 'EAF'])
+```
+
+Check that datasets are ok; especially that LD looks ok; results will="NULL" if all if ok
+```{r}
+check_dataset(eqtl.d2,req=c("snp","varbeta","beta","MAF"))
+check_dataset(gwas.d2,req=c("snp","varbeta","beta","MAF"))
+```
+
+############################
+# 5. Running coloc         #
+############################
+
+Run using the pvalues
+```{r}
+my.res <- coloc.abf(dataset1=gwas.d, dataset2=eqtl.d)
+```
+Print results!
+```{r}
+print(my.res)
+```
+Plot results!
+```{r}
+plot(my.res)
+```
+Run again for the beta variance of beta method
+```{r}
+my.res.bvar <- coloc.abf(dataset1=gwas.d2, dataset2=eqtl.d2)
+```
+
+Print results
+```{r}
+print(my.res.bvar)
+```
+Plot results!
+```{r}
+plot(my.res.bvar)
+```
+
+Print in posterior probability of H4 is at least 0.5
+```{r}
+print(subset(my.res$results,SNP.PP.H4>0.1))
+print(subset(my.res.bvar$results, SNP.PP.H4>0.1))
+```
+
+################################################################
+# 6. Alternative using SuSiE allowing for multiple causal vars #
+**note allele alignment matters**    
+################################################################
+
+Use the datasets we made for beta/variance of beta method that included LD
+- beta
+- varbeta -- variance of beta = (SE of beta)^2
+- snp-- marker name shared across two dataasets
+- position
+- type 'quant' for continuous traits 'cc' for case control
+- N -- sample size
+- MAF-- effect allele frequency
+- LD-- ld matrix (will be used)
+- sdY-- the standard deviation of Y
+
+Run SuSiE on each dataset
+```{r}
+eqtl.s = runsusie(eqtl.d2)
+gwas.s = runsusie(gwas.d2)
+```
+
+Plot each dataset with credible sets of SNPs highlighted
+```{r}
+plot_dataset(gwas.d2,susie_obj=gwas.s,color = c("green4"))
+plot_dataset(eqtl.d2,susie_obj=eqtl.s,color = c("yellow4"))
+```
+
+Run coloc.susie to colocalize every pair of signals 
+```{r}
+susie.res=coloc.susie(gwas.s, eqtl.s)
+print (susie.res$summary)
+print(subset(susie.res$results,SNP.PP.H4.abf > 0.05))
+```
+
+Sensitivity will plots signals we want to consider.  
+Plots Manhattan plots and probabilities for each signal we want to consider
+```{r}
+sensitivity(susie.res,"H4 > 0.9",row=1,dataset1=eqtl.d2,dataset2=gwas.d2)
+```
+  
+
+
+#######################################
+# 7. Save results and plots           # 
+#######################################
+ 
+- Output results if H4 has highest posterior probability (based on pvalues).
+- Output SNP level results based on pvalues for SNP.PP.H4>0.01
+- Ouput plot coloc.abf results based on pvalues
+```{r}
+if(my.res$summary['PP.H4.abf']==max(my.res$summary[-1])){
+	write.table(my.res$summary, paste0(trait1,'.',trait2,'.coloc_abf_gene.pval.txt'), col.names=T, row.names=F, sep='\t', quote=F)
+	write.table(subset(my.res$results,SNP.PP.H4>0.01), paste0(trait1,'.',trait2,'.coloc_abf_snp.pval.txt'), col.names=T, row.names=F, sep='\t', quote=F)
+	}
+
+png("Height.eqtl.coloc_pvalues.png")
+plot(my.res)
+dev.off()
+
+```
+
+- Output results if H4 has highest posterior probability (based on betas).
+- Output SNP level results based on betas for SNP.PP.H4>0.01
+- Output plot coloc.abf results based on betas
+```{r}
+if(my.res.bvar$summary['PP.H4.abf']==max(my.res.bvar$summary[-1])){
+	write.table(my.res.bvar$summary, paste0(trait1,'.',trait2,'.coloc_abf_gene.betas.txt'), col.names=T, row.names=F, sep='\t', quote=F)
+	write.table(subset(my.res.bvar$results,SNP.PP.H4>0.01), paste0(trait1,'.',trait2,'.coloc_abf_snp.betas.txt'), col.names=T, row.names=F, sep='\t', quote=F)
+	}
+
+png("Height.eqtl.coloc_betas.png")
+plot(my.res.bvar)
+dev.off()
+```
+
+- Output results if H4 has highest posterior probability from coloc-susie (>1 causal variant).
+- Output SNP level results based on betas for SNP.PP.H4>0.01 from coloc-susie (>1 causal variant)
+- Output plots of each dataset that include results of runsisie
+- Output Manhattan plots and probabilities for each signal
+```{r}
+write.table(susie.res$summary, paste0(trait1,'.',trait2,'.coloc_susie_abf_gene.txt'), col.names=T, row.names=F, sep='\t', quote=F)
+write.table(subset(susie.res$results,SNP.PP.H4.abf>0.01), paste0(trait1,'.',trait2,'.coloc_susie_abf_snp.txt'), col.names=T, row.names=F, sep='\t', quote=F)
+
+png("Height.gwas.susie_obj.png")
+plot_dataset(gwas.d2,susie_obj=gwas.s,color = c("green4"))
+dev.off()
+
+png("Height.eqtl.susie_obj.png")
+plot_dataset(eqtl.d2,susie_obj=eqtl.s,color = c("yellow4"))
+dev.off()
+
+png("Height.gwas.eqtl.susie_probs.png")
+sensitivity(susie.res,"H4 > 0.9",row=1,dataset1=eqtl.d2,dataset2=gwas.d2)
+dev.off()
+```
+

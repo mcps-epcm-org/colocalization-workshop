@@ -1,0 +1,1185 @@
+---
+title: "Colocalization of Height GWAS Locus and ATP13A2 eQTL"
+author: "Misa Graff"
+date: "`r format(Sys.time(), '%B %d, %Y, %R')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- '../Documents/Colocalization';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(inputFile), out_dir)) })
+output: 
+  html_document:
+   toc: true
+---
+
+```{=html}
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+```
+
+```{css format, echo=FALSE}
+.code-lock {
+  background-color: #E8EAF1;
+  border: 3px solid #DFE2EC;
+  font-weight: bold;
+}
+.code-key {
+  background-color: #E8EAF1;
+  border: 3px solid #DFE2EC;
+  font-weight: bold;
+}
+
+.custom-inline {
+  color: white;
+  font-weight: 700
+}
+```
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE, 
+                      echo = FALSE,
+                      class.source="code-lock",
+                      class.output="code-lock") 
+
+```
+
+------------------------------------------------------------------------
+
+########################################################## 
+
+# Colocalización genética
+
+########################################################## 
+
+La colocalización genética es un método estadístico que identifica factores genéticos compartidos entre dos o más rasgos en un locus específico. Puede ayudar a descubrir variantes causales superpuestas que causan fenotipos de enfermedades complejas o moleculares. Por ejemplo, si la señal en un locus genético determinado para un rasgo y el nivel de expresión génica se colocalizan, esto podría indicar el papel de un gen en la causa de la enfermedad. Otro ejemplo, si las señales para el nivel de proteína y el nivel de expresión génica se colocalizan, esto podría indicar el papel de un gen en la producción de esa proteína. Un tercer ejemplo, si las señales en un locus dado para dos rasgos (por ejemplo, presión sanguínea y enfermedad coronaria) se colocalizan, esto podría indicar el papel de este locus genético en ambos rasgos juntos (en este ejemplo, la presión sanguínea afecta a la enfermedad coronaria).
+
+En este wrokshop vamos a utilizar un paquete de R llamado 'coloc' para observar las señales de un locus genético para dos rasgos, proteínas o niveles de expresión diferentes y ver si se colocalizan.
+
+------------------------------------------------------------------------
+
+########################################################## 
+
+## 0. Preparación de R
+
+########################################################## 
+
+```{r clear work area, echo=TRUE}
+
+# Limpiamos el ambiente dentro de R. 
+rm(list = ls(all = TRUE))
+
+```
+
+Para los análisis en este documento se utilizan los paquetes `coloc` y `Rfast`. El primero tiene funciones para llevar a cabo pruebas de colocalización, carga a su vez `ggplot2`, `data.table` y otros paquetes adicionales. `Rfast` tiene una serie de funciones para el análisis de datos, como regresiones lineal y logísticas, y obtener estadísticas descriptivas.
+
+Podemos instalarlos con los siguientes comandos:
+
+```{r install packages, echo=TRUE, eval=FALSE}
+
+install.packages("coloc")
+install.packages("Rfast")
+
+```
+
+Para cargar los paquetes de *R* utilizamos los siguientes comandos:
+
+```{r libraries, echo=TRUE, eval=FALSE}
+
+library("coloc")
+library("Rfast")
+
+```
+
+```{r real libraries}
+# Real input
+pacman::p_load(coloc, Rfast, here, tidyverse, knitr)
+
+"%&%" <- function(a, b) paste0(a, b)
+
+```
+
+------------------------------------------------------------------------
+
+########################################################## 
+
+## 1. Lectura y preparación de los datos análisis
+
+########################################################## 
+
+Como hemos mencionado con anterioridad, para llevar a cabo el análisis de colocalización vamos a utilizar el paquete `coloc`. Los argumentos que requiere este paquete para trabajar son los siguientes:
+
+-   `file1` Archivo GWAS 1, asumidos como eQTLs para un transcrito.
+-   `file2` Archivo GWAS 2, estadísticas descriptivas de un GWAS.\
+-   `trait1` Rasgo 1, puede ser el nombre de un gen.
+-   `trait1` Rasgo 2, fenotipo del GWAS.
+
+Para correr el primer ejemplo de colocalización tenemos que asignar los valores a cada uno de los argumentos a usar en nuestras funciones.
+
+```{r cat files}
+
+cat(" Archivo de GWAS 1:\n",
+  "file1 <- \"ENSG00000159363.17.GTEx.eqtl.txt\"", "\n")
+
+cat(  "Archivo de GWAS 2:\n",
+  "file2 <- \"Height_HIS.GWAS.ENSG00000159363.coloc.input\"", "\n")
+
+cat(" Rasgo 1:\n",
+    "trait1 <- \"ENSG00000159363\"", "\n")
+
+cat("Rasgo 2:\n",
+    "trait2 <- \"height\"", "\n")
+
+```
+
+```{r real files}
+# Real input
+file1 <- 
+  here("Data/" %&% "ENSG00000159363.17.GTEx.eqtl.txt")
+
+file2 <- 
+  here("Data/" %&% "Height_HIS.GWAS.ENSG00000159363.coloc.input")
+
+trait1 <- "ENSG00000159363"
+
+trait2 <- "height"
+
+```
+
+Para seguir con el análisis, necesitamos establecer el **directorio de trabajo**. Necesitamos establecer ya que es ahí donde vamos a centralizar nuestro trabajo, vamos a guardar los outputs que generemos, los resultados de nuestros análisis, y gráficos. Antes que nada, para saber cuál es nuestro directorio de trabajo actual usamos `getwd()`:
+
+```{r wd, echo=TRUE, eval=FALSE}
+getwd()
+```
+
+```{r print wd}
+
+print("~/home/user")
+
+```
+
+Ahora que sabemos en qué directorio estamos vamos a generar un folder (o directorio) donde vamos a trabajar. Podemos hacerlo de varias formas: manualmente con el explorador de archivos, directamente en la terminal con `mkdir`, o con `dir.crate()`. Para los últimos dos necesitamos la **ruta** hacia el nuevo directorio.
+
+```{r LD Dir, eval=FALSE, echo=TRUE}
+
+# Esta función sólo requiere el nombre del nuevo directorio. 
+dir.create("coloc")
+
+```
+
+Para poder crearlo desde la terminal usamos el comando `mkdir`:
+  
+```{r mkdir, echo=TRUE, eval=FALSE}
+
+# Podemos correrlo directamente en R
+system('mkdir coloc')       # El comando `system()` realiza un comando en el sistema. 
+
+```
+
+O podemos hacerlo directamente en la terminal:
+  
+```{r mkdir bash, eval=FALSE, echo=TRUE, engine='bash'}
+mkdir coloc
+```
+
+Establecemos un nuevo directorio de trabajo con `setwd()`. Indicamos la nueva **ruta** del nuevo directorio de trabajo:
+
+```{r setwd, eval=FALSE, echo=TRUE}
+
+setwd("coloc")
+
+```
+
+Ya que estamos en nuestro **directorio de trabajo** podemos seguir con nuestro trabajo. El primer paso a realizar es importar la tabla con los datos de resumen estadísticos de la región (gwas1/eqtls).
+
+**Antes de cargar nuestros datos, es necesario saber dónde están.** Para este taller podemos acceder a nuestra información desde la ruta **_"/storage/workshops/colocalization-workshop/"_**. Para hacer más sencillo el cargar la información, generamos un objeto con esta data. 
+
+```{r read eqtl, echo=TRUE}
+
+# Los datos para este workshop se encuentran en otra parte del servidor, para acceder a esto 
+data_path <- "/storage/workshops/colocalization-workshop/"
+
+# Para cargar los datos usamos la función "paste0()", que sirve para juntar dos strings. 
+# En este caso, el nombre del archivo y dónde se localiza. Por ejemplo: 
+paste0(data_path, file1)
+
+# NOTA: Hay otra función similar a `paste0()`, esta es `paste()`. Son identicas 
+# en su función, (las dos juntan strings), la única diferencia es que `paste()` 
+# pone un espacio entre los strings, mientras que `paste0()` los ignora.
+
+paste("a", "b", "c")
+paste0("a", "b", "c")
+
+```
+
+```{r, echo=TRUE, eval=FALSE}
+
+eqtl <- read.table(paste0(data_path, file1),     # eQTLs 
+                   header = T,                   # Indica que la tabla tiene nombres de las variables
+                   stringsAsFactors = F)         # Especifica si variables tipo caracter se 
+                                                 # transforman a tipo factor 
+```
+
+Importamos los datos de estadísticas descriptivas del gwas2.
+
+```{r read gwas, echo=TRUE, eval=FALSE}
+
+gwas <- read.table(paste0(data_path, file2),     # Estadisticas descriptivas
+                   header = T,                   # La tabla tiene nombres de las variables
+                   stringsAsFactors = F)         # Especifica si variables tipo caracter se 
+                                                 # transforman a tipo factor 
+
+```
+
+```{r}
+eqtl <- read.table(file1,                    # eQTLs 
+                   header = T,               # Indica que la tabla tiene nombres de las variables
+                   stringsAsFactors = F)     # Especifica si variables tipo caracter se 
+                                             # transforman a tipo factor 
+
+gwas <- read.table(file2,                    # Estadisticas descriptivas
+                   header = T,               # La tabla tiene nombres de las variables
+                   stringsAsFactors = F)     # Especifica si variables tipo caracter se 
+```
+
+Asignamos nombres a las filas de cada una de las tablas para poder compararlas. Estos nombres deben ser únicos.
+
+```{r row names, echo=TRUE}
+
+rownames(eqtl) <- eqtl$rsID
+rownames(gwas) <- gwas$MarkerName
+
+```
+
+Después de importar los datos a nuestra área de trabajo y prepararla, podemos revisar que haya variables significativas en el GWAS.
+
+```{r signal and significance, echo=TRUE}
+
+# Is there a suggestive signal in GWAS2?
+
+if (dim(gwas[which(gwas$p_value < 1e-5),])[1] > 0){
+  cat(" ¿Existe una señal sugerente en GWAS2 (P < 1e-5)?", "\n",
+      "Sí, sí existe una señal sugerente.", "\n\n")
+  } else {
+  cat(" ¿Existe una señal sugerente en GWAS2 (P < 1e-5)?", "\n",
+      "No se identificó ninguna señal.", "\n\n")
+    }
+
+#is there a significant signal in GWAS2?
+
+if(dim(gwas[which(gwas$p_value < 5e-8),])[1]>0){
+  cat(" ¿Existe una señal significativa en GWAS2 (P < 5e-8)?", "\n", 
+      "Sí, sí existe una señal significativa.", "\n\n")
+  } else {
+  cat(" ¿Existe una señal significativa en GWAS2 (P < 5e-8)?", "\n",
+      "No se identificó ninguna señal significativa.", "\n\n")
+  }
+
+```
+
+A continuación, vamos a crear una lista con los nombres de cada RSID (Reference SNP cluster ID) que están en tabla del GWAS. Quedándonos sólo con las variantes que tienen un valor de P válido.
+
+```{r tables match, echo=TRUE}
+
+# Hacemos match entre el RSID de la base de datos del GWAS y el del eQTL.
+eqtl <- eqtl[gwas$MarkerName, ]
+
+# Eliminamos todos los valores que tienen NA (Missing) en el valor de P. 
+eqtl <- eqtl[which(!is.na(eqtl$pval_asc)), ]
+
+```
+
+Hasta el momento, nuestros archivos se deben ver de esta forma:
+
+```{r data so-far1}
+
+kable(head(eqtl), booktabs = T, caption = "eQTL Table") %>%
+  kableExtra::kable_styling(latex_options = c("scale_down", "HOLD_position"),
+                            font_size = 11, position = "center") %>% 
+  kableExtra::kable_classic(full_width = F) %>%   
+  kableExtra::add_footnote("Se muestran las primeras seis observaciones", notation = "symbol")
+
+kable(head(gwas), booktabs = T, caption = "GWAS Table") %>% 
+  kableExtra::kable_styling(latex_options = c("scale_down", "HOLD_position"), 
+                            font_size = 11, position = "center") %>% 
+  kableExtra::kable_classic(full_width = F) %>% 
+  kableExtra::add_footnote("Se muestran las primeras seis observaciones", notation = "symbol")
+
+```
+
+------------------------------------------------------------------------
+
+########################################################## 
+
+## 2. Archivos necesarios para correr PLINK: Formato y control de calidad
+
+########################################################## 
+
+Tenemos que obtener dos archivos. El primero tiene el nombre y referencia de alelo de salida. El segundo archivo contiene sólo los nombres de los alelos. Para guardar los resultados de `plink` vamos a crear un nuevo directorio con `dir.crate()`.
+
+```{r LD Dir2, eval=FALSE, echo=TRUE}
+
+dir.create("LD")
+ 
+```
+
+Procedemos a generar las tablas con la información de los alelos.
+
+```{r salvar tables, eval=FALSE, echo=TRUE}
+
+write.table(
+  # Seleccionamos las variables 'rsID' y 'REF' de la base de datos eQTL
+  x = eqtl[, c('rsID', 'REF')], 
+  
+  # Indicamos la ruta y el nombre del archivo en el cual vamos a guardar la información  
+  file = paste0('LD/', trait1, '.SNP.REF.txt'),
+  
+  # Otras opciones: 
+  col.names = F,        # se asignan nombres a las filas o columnas
+  row.names = F,        
+  sep = '\t',           # Cómo se separan los valores, en este caso con espacio. 
+  quote = F)   
+
+write.table(
+  # Seleccionamos la variable 'rsID' de la base de datos DE GWAS
+  x = eqtl[, c('rsID')], 
+  
+  # Indicamos la ruta y el nombre del archivo en el cual vamos a guardar la información  
+  file =  paste0('LD/', trait1, '.SNP.extract'), 
+  
+  # Otras opciones
+  col.names=F, row.names=F, sep='\t', quote=F) 
+
+```
+
+```{r real tables}
+# Real input
+write.table(eqtl[, c('rsID', 'REF')], 
+  here("Data/LD", paste0(trait1, '.SNP.REF.txt')), 
+  col.names = F, row.names = F, sep = '\t', quote=F)
+
+write.table(eqtl[, c('rsID')], 
+  here("Data/LD", paste0(trait1, '.SNP.extract')), 
+  col.names = F, row.names = F, sep = '\t', quote=F)
+
+# PAU: Archivos de life saver que nos envío Misa en un primer momento
+
+```
+
+Con los archivos que generados, vamos a correr `plink` para obtener *Linkage Disequilibrium* (LD), desde **1KG.AMR** y **1KG.EUR**. 
+
+**Recuerda que ya generamos la ruta a los datos en el objeto** `data_path` (`r data_path`).
+
+```{r plink bim, echo=TRUE, eval=FALSE}
+
+# Para usar plink en el servidor de la UME necesitamos indicar dónde se encuentra.
+plink <- paste0("/apps/plink/", "plink")      # generamos un objeto con la ruta
+
+# NOTA: Es necesario cambiar la ruta a plink al trabajar en otros sistemas. 
+
+CHR <- "chr1"
+
+system(
+  paste0(plink, 
+         # Indica que lea el archivo ".vcf" (Variant Call Format) 
+         ' --vcf ', data_path, '1KG.AMR.GRCH38.rsID.', CHR, '.region.vcf',
+         
+         # lista de ID de variantes
+         ' --extract LD/', trait1, '.SNP.extract',
+         
+         # Indicador de sistema, inidca cuantos "threads" debe usar el CPU
+         ' --threads 1', 
+         
+         # Actualiza los alelos de referencia. 
+         ' --update-ref-allele LD/', trait1, '.SNP.REF.txt 2 1',
+         
+         # calcula y reporta las correlaciones brutas de recuento de alelos entre variantes
+         ' --r square',
+         
+         # Directorio y nombre a dar a los archivos que se generen del análisis
+         ' --out LD/AMR', trait1, '.LD', 
+         
+         # Indica que genere solamente un archivo ".bim"
+         ' --make-just-bim'))
+
+system(
+  paste0(plink, 
+         ' --vcf ', data_path, '1KG.EUR.GRCH38.rsID.', CHR, '.region.vcf', 
+         ' --extract LD/', trait1,'.SNP.extract', 
+         ' --threads 1',
+         ' --update-ref-allele LD/', trait1,'.SNP.REF.txt 2 1', 
+         ' --r square',
+         ' --out LD/EUR', trait1,'.LD', 
+         ' --make-just-bim'))
+
+```
+
+```{r, eval=FALSE, engine='bash'}
+# Si no es posible correr esto en la terminal, podemos copiar y pegar los comandos en la terminal:
+PATH=$PATH:/apps/plink     # Incluimos plink en el path
+
+# Generamos variables con los nombres de los archivos
+trait1="ENSG00000159363"
+CHR="chr1"
+
+# AMR 
+plink --vcf Data/1KG.AMR.GRCH38.rsID.$CHR.region.vcf --extract Data/LD/$trait1.SNP.extract --threads 1 --update-ref-allele Data/LD/$trait1.SNP.REF.txt 2 1 --r square --out Data/LD/Plink\ step1/AMR$trait1.LD --make-just-bim
+
+plink --vcf Data/1KG.EUR.GRCH38.rsID.$CHR.region.vcf --extract Data/LD/$trait1.SNP.extract --threads 1 --update-ref-allele Data/LD/$trait1.SNP.REF.txt 2 1 --r square --out Data/LD/Plink\ step1/EUR$trait1.LD --make-just-bim
+
+# Nota: Por alguna razon no se corre desde la terminal de R, por lo que corri los comandos desde la terminal ssh
+# Follow-up: Ya se solucionó el problema
+
+# PAU: Se generaron los achivos life saver para tenerlos en el servidor
+```
+
+Después de esto, leemos los archivos `.bim` **AMR** y **EUR** que generamos en `plink`. Estos archivos enlistan las variantes, sus posiciones y alelos.
+
+```{r read bim, eval=FALSE, echo=TRUE}
+
+amrbim <- read.table(paste0('LD/AMR', trait1, '.LD.bim'), header=F)
+
+eurbim <- read.table(paste0('LD/EUR', trait1, '.LD.bim'), header=F)
+
+```
+
+```{r read bim true}
+# Real input
+
+amrbim <- read.table(here(paste0('Data/LD/Plink step1/AMR', trait1, '.LD.bim')), header=F)
+eurbim <- read.table(here(paste0('Data/LD/Plink step1/EUR', trait1, '.LD.bim')), header=F)
+
+```
+
+Les damos nombre a cada columna de los archivos `.bim` que cargamos a nuestro ambiente de trabajo.
+
+```{r, echo=TRUE}
+
+colnames(amrbim) <- c("chr", "rsid", "cM", "position", "allele1", "allele2")
+colnames(eurbim) <- c("chr", "rsid", "cM", "position", "allele1", "allele2")
+
+```
+
+### AMR tiene más variantes en el archivo de LD
+
+Si comparamos el número de variantes incluidas en las tablas de AMR y EUR, la primera tiene `r nrow(amrbim) - nrow(eurbim)` variantes más.
+
+```{r, echo=TRUE}
+
+nrow(amrbim)
+
+nrow(eurbim)
+
+```
+
+Importamos la matriz de LD para asegurarnos que no existan valores con **missing** (**NA**). Todos los valores de estos datos son numéricos.
+
+```{r, eval=FALSE, echo=TRUE}
+ldamr <-  as.matrix(read.table(paste0('LD/AMR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+
+ldeur <-  as.matrix(read.table(paste0('LD/EUR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+```
+
+```{r}
+# Real input
+ldamr <- as.matrix(
+  read.table(
+    here(paste0('Data/LD/Plink step1/AMR',trait1,'.LD.ld')),
+    header=F, stringsAsFactors=F))
+
+ldeur <- as.matrix(
+  read.table(
+    here(paste0('Data/LD/Plink step1/EUR',trait1,'.LD.ld')), 
+    header=F, stringsAsFactors=F))
+
+```
+
+Después de cargados nuestros datos, les damos identificadores a cada columna y fila en cada matriz. Para eso, utilizamos los rsIDs de cada grupo (AMR, EUR).
+
+```{r, echo=TRUE}
+# AMR
+colnames(ldamr) <- amrbim[, "rsid"] # Col 
+rownames(ldamr) <- amrbim[, "rsid"] # Row
+
+# eur
+colnames(ldeur) <- eurbim[, "rsid"] # Col
+rownames(ldeur) <- eurbim[, "rsid"] # Row
+```
+
+Revisamos si dentro de las matrices tenemos datos con **missings** (**NA**). Esto es necesario porque para nuestros análisis las matrices de LD no pueden tener valores en missing y tienen que ser del mismo tamaño.
+
+```{r, echo=TRUE}
+# Sumamos los valores con missing en cada columna
+
+miss.amr <- colSums(is.na(ldamr)) 
+miss.eur <- colSums(is.na(ldeur)) 
+
+max(miss.eur)
+min(miss.eur)
+
+max(miss.amr)
+min(miss.amr)
+```
+
+Sólo la matriz de LD de AMR tiene valores con missings. Tenemos que revisar cuál SNP es el que tiene valores en missing.
+
+```{r, echo=TRUE}
+
+colnames(ldamr)[colSums(is.na(ldamr)) > 0]
+
+```
+
+```{r, echo=TRUE, eval=FALSE}
+
+colnames(ldeur)[colSums(is.na(ldeur)) > 0]
+
+```
+
+```{r}
+# Real input
+cat(head(colnames(ldeur)[colSums(is.na(ldeur)) > 0], n = 50), "...",
+    paste0("\n\nSe reportan otras ", length(colnames(ldeur)[colSums(is.na(ldeur)) > 0]) - 50, " variantes"))
+```
+
+```{r, echo=TRUE}
+
+colnames(ldeur)[colSums(is.na(ldeur)) > 10]
+
+```
+
+Después de análizar los datos, determinamos que el SNP culpable es el `r colnames(ldeur)[colSums(is.na(ldeur)) > 10]`. Por lo que lo eliminamos de la base de datos `eurbim`.
+
+```{r, echo=TRUE}
+
+eurbim <- eurbim[eurbim$rsid != "rs78116095",]
+
+nrow(eurbim)
+
+```
+
+Al eliminar este SNP de la base de datos, nos quedamos con `r nrow(eurbim)` variantes en la base de datos de EUR. Recordemos que la base de datos de AMR tiene más variantes que la de EUR (`r nrow(amrbim)` vs `r nrow(eurbim)`), por lo que tenemos que rehacer la base AMR para que las dos tengan las mismas variantes.
+
+```{r, echo=TRUE, eval=FALSE}
+
+write.table(eurbim[,c(2,5)],                          # Identificamos las columnas de rsID y REF
+            paste0('LD/',trait1,'.SNP.REF.txt'), 
+            col.names=F, row.names=F, sep='\t', quote=F)
+
+write.table(eurbim[,2],                               # Identificamos la columna de rsID 
+            paste0('LD/', trait1, '.SNP.extract'), 
+            col.names=F, row.names=F, sep='\t', quote=F)
+
+```
+
+```{r}
+# Real input
+write.table(eurbim[, c(2, 5)],
+            here(paste0('Data/LD/', trait1, '_2.SNP.REF.txt')), 
+            col.names=F, row.names=F, sep='\t', quote=F)
+
+write.table(eurbim[, 2],
+            here(paste0('Data/LD/', trait1, '_2.SNP.extract')), 
+            col.names=F, row.names=F, sep='\t', quote=F)
+
+```
+
+### Guardamos los nombres de las variantes en una nueva tabla
+
+Con nuestros datos listos, corremos de nuevo `plink` para obtener LD, desde **1KG.AMR** y **1KG.EUR**, usando los archivos actualizados.
+
+```{r plink bim2, echo=TRUE, eval=FALSE}
+
+system(
+  paste0(plink,
+         ' --vcf ', data_path, '1KG.AMR.GRCH38.rsID.', CHR, '.region.vcf',
+         ' --extract LD/', trait1, '.SNP.extract',
+         ' --threads 1', 
+         ' --update-ref-allele LD/', trait1, '.SNP.REF.txt 2 1',
+         ' --r square',
+         ' --out LD/AMR', trait1, '.LD', 
+         ' --make-just-bim'))
+
+system(
+  paste0(plink,
+         ' --vcf ', data_path, '1KG.EUR.GRCH38.rsID.', CHR, '.region.vcf', 
+         ' --extract LD/', trait1,'.SNP.extract', 
+         ' --threads 1',
+         ' --update-ref-allele LD/', trait1,'.SNP.REF.txt 2 1', 
+         ' --r square',
+         ' --out LD/EUR', trait1,'.LD', 
+         ' --make-just-bim'))
+
+```
+
+```{r, eval=FALSE, engine='bash'}
+# Si no es posible correr esto en la terminal, podemos copiar y pegar los comandos en la terminal:
+PATH=$PATH:/apps/plink     # Incluimos plink en el path
+
+# Generamos variables con los nombres de los archivos
+trait1="ENSG00000159363_2"
+CHR="chr1"
+
+# AMR 
+plink --vcf Data/1KG.AMR.GRCH38.rsID.$CHR.region.vcf --extract Data/LD/$trait1.SNP.extract --threads 1 --update-ref-allele Data/LD/$trait1.SNP.REF.txt 2 1 --r square --out Data/LD/Plink\ step2/AMR$trait1.LD --make-just-bim
+
+plink --vcf Data/1KG.EUR.GRCH38.rsID.$CHR.region.vcf --extract Data/LD/$trait1.SNP.extract --threads 1 --update-ref-allele Data/LD/$trait1.SNP.REF.txt 2 1 --r square --out Data/LD/Plink\ step2/EUR$trait1.LD --make-just-bim
+
+# Nota: Por alguna razon no se corre desde la terminal de R, por lo que corri los comandos desde la terminal ssh 
+# PAU: Se generaron los achivos life saver para tenerlos en el servidor
+```
+
+Importamos los archivos `.bim` generados desde `plink`.
+
+```{r, echo=TRUE, eval=FALSE}
+
+amrbim <- read.table(paste0('LD/AMR',trait1,'.LD.bim'), header=F)
+
+eurbim <- read.table(paste0('LD/EUR',trait1,'.LD.bim'), header=F)
+
+```
+
+```{r}
+# Real input
+amrbim <- read.table(here(paste0('Data/LD/Plink step2/AMR', trait1, '_2.LD.bim')), header=F)
+eurbim <- read.table(here(paste0('Data/LD/Plink step2/EUR', trait1, '_2.LD.bim')), header=F)
+```
+
+Asignamos los nombres a cada columna.
+
+```{r, echo=TRUE}
+
+colnames(amrbim) <- c("chr", "rsid", "cM", "position", "allele1", "allele2")
+
+colnames(eurbim) <- c("chr", "rsid", "cM", "position", "allele1", "allele2")
+
+```
+
+Revisamos que el LD para **AMR** y **EUR** tengan el mismo número de variantes
+
+```{r, echo=TRUE}
+
+nrow(eurbim)
+
+nrow(amrbim)
+
+```
+
+Generamos una lista de los marcadores (rsIDs) que se encuentran en los archivos `.bim` de **AMR** y **EUR**.
+
+```{r, echo=TRUE}
+eqtl <- eqtl[eurbim$rsid, ]
+
+gwas <- gwas[amrbim$rsid, ]
+```
+
+A continuación, revisamos que todos los archivos hasta ahora sean iguales en tamaño de filas y columnas.
+
+```{r, echo=TRUE}
+dim(gwas)
+dim(eqtl)
+```
+
+```{r, echo=TRUE}
+dim(amrbim)
+dim(eurbim)
+```
+
+Importamos las matrices de LD (valores numéricos).
+
+```{r, echo=TRUE, eval=FALSE}
+ldamr <- as.matrix(read.table(paste0('LD/AMR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+
+ldeur <- as.matrix(read.table(paste0('LD/EUR',trait1,'.LD.ld'), header=F, stringsAsFactors=F))
+```
+
+```{r}
+# Real input
+ldamr <- as.matrix(
+  read.table(here(paste0('Data/LD/Plink step2/AMR', trait1, '_2.LD.ld')),
+             header = F, stringsAsFactors = F))
+
+ldeur <- as.matrix(
+  read.table(here(paste0('Data/LD/Plink step2/EUR', trait1, '_2.LD.ld')),
+             header = F, stringsAsFactors = F))
+
+```
+
+A cada columna y fila de la matriz lo identificamos con los rsIDs.
+
+```{r, echo=TRUE}
+colnames(ldamr) <- amrbim[, "rsid"]
+rownames(ldamr) <- amrbim[, "rsid"]
+colnames(ldeur) <- eurbim[, "rsid"]
+rownames(ldeur) <- eurbim[, "rsid"]
+```
+
+Volvemos a revisar que no tengamos valores con **missings** (**NA**).
+
+```{r, echo=TRUE}
+colnames(ldamr)[colSums(is.na(ldamr)) > 0]
+
+colnames(ldeur)[colSums(is.na(ldeur)) > 0]
+```
+
+**Ninguna de las matrices contiene valores en missing.**
+
+------------------------------------------------------------------------
+
+######################################################################## 
+
+## 3. Crear las bases de datos necesarias que se enfoquen en comparar P-values
+
+######################################################################## 
+
+Necesitamos generar dos listas:
+
+1.  Lista con los elementos requeridos para el rasgo 1 (`trait1`) y el archivo 1 (**eQTL**).
+2.  Lista con los elementos requeridos para el rasgo 2 (`trait2`) y el archivo 2 (**GWAS**).
+
+Cada lista debe contener los siguientes elementos:
+
+-   **pvalues**, son los p-values de cada SNP.
+-   **snp**, nombre del marcador en las dos bases de datos.
+-   **MAF**, frecuencia del alelo de efecto.
+-   **position**, posición del marcador.
+-   **type**, especificamos `'quant'` para rasgos continuos (_cc_ indica casos y controles).
+-   **N**, tamaño de la muestra.
+-   **s** fracción de la muestra que son casos, (Sólo necesario si se indica cc; como estamos usando un rasgo cuantitativo no lo incluimos).
+
+```{r, echo=TRUE}
+eqtl.d <- 
+  list(pvalues = eqtl[eurbim$rsid, 'pval_asc'],
+       snp = eqtl[eurbim$rsid, 'rsID'],
+       MAF = eqtl[eurbim$rsid, 'maf_trc'], 
+       position = eurbim$position, 
+       type = 'quant',
+       N = eqtl$samples_asc[1])
+
+gwas.d <- 
+  list(pvalues = gwas[amrbim$rsid,'p_value'],
+       snp = gwas[ amrbim$rsid, 'MarkerName'], 
+       MAF = gwas[amrbim$rsid, 'EAF'], 
+       position = amrbim$position, 
+       type = 'quant',
+       N = 50000)
+```
+
+Revisamos que nuestra información esté bien. Para esto usamos la función `check_dataset()` que es parte del paquete `coloc`; Si nuestros datos están bien el output va a ser `NULL`.
+
+```{r, echo=TRUE}
+check_dataset(eqtl.d, req = c("snp", "pvalues"))
+check_dataset(gwas.d, req = c("snp", "pvalues"))
+```
+
+**Nuestra información está bien. Procedemos con nuestros análisis.**
+
+------------------------------------------------------------------------
+
+############################################################################## 
+
+## 4. Crear las bases de datos y comparación de las betas 𝛽 (_VarBeta_)
+
+############################################################################## 
+
+Para el input que vamos a utilizar necesitamos la varianza. Esto lo calculamos con el error estándar ($se$) de la beta ($\beta$).
+
+```{r, echo=TRUE}
+eqtl$varbeta <- eqtl$beta_se_asc ^ 2
+
+gwas$varbeta <- gwas$se_0 ^ 2
+```
+
+A continuación, necesitamos obtener una lista de todos los elementos necesarios para el rasgo 1 (`trait1`) y 2 (`trait2`), correspondiente a cada archivo (**eQTL**, **GWAS**). 
+
+Cada lista debe contener los siguientes elementos:
+
+-   **snp**, nombre del marcador en las dos bases de datos.
+-   **beta**, valor de beta $\beta$.
+-   **varbeta**, varianza de la beta $\beta$. $(se\beta)^2$
+-   **position**, posición del marcador.
+-   **type**, especificamos `'quant'` para rasgos continuos.
+-   **N**, tamaño de la muestra.
+-   **LD**, matriz de DL (**No se incluye**).
+-   **sdY**, Desviación estándar de $Y$.
+-   **MAF**, frecuencia del alelo de efecto.
+-   **cc**, indica casos y controles.
+
+```{r, echo=TRUE}
+eqtl.d2 <- 
+  list(snp = eqtl[eurbim$rsid, 'rsID'], 
+       beta = eqtl[eurbim$rsid, 'beta_asc'],
+       varbeta = eqtl[eurbim$rsid, 'varbeta'], 
+       position = eurbim$position, 
+       type = 'quant', 
+       N = eqtl$samples_asc[1],
+       LD = ldeur, 
+       sdY = 1, 
+       MAF = eqtl[eurbim$rsid, 'maf_trc'])
+
+gwas.d2 <- 
+  list(snp = gwas[amrbim$rsid, 'MarkerName'], 
+       beta = gwas[amrbim$rsid, 'beta_0'], 
+       varbeta = gwas[amrbim$rsid, 'varbeta'], 
+       position = amrbim$position, 
+       type = 'quant', 
+       N = 50000, 
+       LD = ldamr, 
+       sdY=1, 
+       MAF = gwas[amrbim$rsid, 'EAF'])
+```
+
+Revisamos que las bases de datos estén bien; haciendo énfasis en el **LD**. Volvemos a usar `check_dataset()` del paquete `coloc`; Si nuestros datos están bien el output que nos va a dar es `NULL`.
+
+```{r, echo=TRUE}
+check_dataset(eqtl.d2,req = c("snp", "varbeta", "beta", "MAF"))
+check_dataset(gwas.d2,req = c("snp", "varbeta", "beta", "MAF"))
+```
+
+**Nuestra información está bien. Procedemos con nuestros análisis.**
+
+------------------------------------------------------------------------
+
+############################ 
+
+## 5. Ejecutando coloc
+
+############################ 
+
+### P-values {.tabset}
+
+Ejecutamos nuestros primeros análisis de colocalización utilizando P-values. La función `coloc.abf()` realiza el análisis utilizando las dos primeras listas que generamos en el **tercer tema** (**gwas.d** y **eqtl.d**). Esta función calcula las probabilidades posteriores de diferentes configuraciones de variantes causales bajo el supuesto de una única variante causal para cada rasgo.
+
+<!-- De la documentación: This function calculates posterior probabilities of different causal variant configurations under the assumption of a single causal variant for each trait. -->
+
+```{r, echo=TRUE}
+my.res <- coloc.abf(dataset1 = gwas.d, dataset2 = eqtl.d)
+```
+
+A pesar de que guardamos nuestros resultados en un objeto (`my.res`), obtenemos un output en la consola. 
+
+#### Resultados de análisis
+
+Resultados de análisis de colocalización de los rasgos 1 y 2 por método de P-value.
+
+```{r, echo=TRUE, warning=TRUE}
+
+print(my.res)
+
+```
+
+<!-- Por alguna razón, el output de este resultado no es igual al de Misa, pero contiene la misma información general. -->
+
+#### Plot
+
+```{r, echo=TRUE, fig.align='center'}
+
+plot(my.res)
+
+```
+
+## {-}
+
+------------------------------------------------------------------------
+
+### Betas $\beta$ {.tabset}
+
+Vamos a seguir con los análisis de colocalización cambiando el método de análisis por medio de las betas $\beta$. Utilizamos las dos listas que generamos en el **tema 4** (**gwas.d2** y **eqtl.d2**). 
+
+```{r, echo=TRUE}
+
+my.res.bvar <- coloc.abf(dataset1 = gwas.d2, dataset2 = eqtl.d2)
+
+```
+
+#### Resultados de análisis
+
+Resultados de análisis de colocalización de los rasgos 1 y 2 por método de Betas.
+
+```{r, echo=TRUE, warning=TRUE}
+print(my.res.bvar)
+```
+
+#### Plot
+
+```{r, echo=TRUE, fig.align='center'}
+plot(my.res.bvar)
+```
+
+## {-}
+
+Revisamos si la probabilidad posterior de H4 es al menos **0.5** en los dos métodos. 
+
+```{r, echo=TRUE, eval=FALSE}
+print(subset(my.res$results, SNP.PP.H4 > 0.1))
+
+print(subset(my.res.bvar$results, SNP.PP.H4>0.1))
+```
+
+```{r}
+# Real input
+
+my.res$results %>% 
+  filter(SNP.PP.H4 > 0.1) %>% 
+  kable(booktabs = T) %>%
+  kableExtra::kable_styling(latex_options = c("scale_down", "HOLD_position"),
+                            font_size = 11, position = "center") %>% 
+  kableExtra::kable_classic(full_width = F)   
+
+my.res.bvar$results %>% 
+  filter(SNP.PP.H4 > 0.1) %>% 
+  kable(booktabs = T) %>%
+  kableExtra::kable_styling(latex_options = c("scale_down", "HOLD_position"),
+                            font_size = 11, position = "left") %>% 
+  kableExtra::kable_classic(full_width = F)   
+
+```
+
+------------------------------------------------------------------------
+
+################################################################ 
+
+## 6. SuSiE para múltiples variables causales, análisis alternativo
+
+################################################################
+
+En este análisis usamos las series de datos que hicimos con el método de varianza de betas que incluye LD. En este análisis usamos los siguientes elementos: 
+
+-   **snp**, nombre del marcador en las dos bases de datos.
+-   **beta**, valor de beta $\beta$.
+-   **varbeta**, varianza de la beta $\beta$. $(se\beta)^2$
+-   **position**, posición del marcador.
+-   **type**, especificamos `'quant'` para rasgos continuos.
+-   **N**, tamaño de la muestra.
+-   **LD**, matriz de DL (**Se va a utilizar**).
+-   **sdY**, Desviación estándar de $Y$.
+-   **MAF**, frecuencia del alelo de efecto.
+-   **cc**, indica casos y controles.
+
+Ejecutamos SuSiE en cada dataset.
+
+```{r, echo=TRUE, warning=TRUE}
+eqtl.s <- runsusie(eqtl.d2)
+
+gwas.s <- runsusie(gwas.d2)
+```
+
+Graficamos cada dataset resaltando cada grupo de SNPs creíbles.
+
+```{r, echo=TRUE, figures-side, fig.show="hold", out.width="50%"}
+plot_dataset(gwas.d2, susie_obj = gwas.s, color = c("green4"))
+
+plot_dataset(eqtl.d2, susie_obj = eqtl.s, color = c("yellow4"))
+```
+
+Ejecutamos `coloc.susie()` para colocalizar cada par de señales. 
+
+```{r, echo=TRUE, eval=FALSE}
+susie.res <- coloc.susie(gwas.s, eqtl.s)
+```
+
+```{r, echo=TRUE, eval=FALSE}
+susie.res$summary
+```
+
+```{r}
+# Real input
+susie.res <- coloc.susie(gwas.s, eqtl.s)
+
+susie.res$summary %>%
+  kable(booktabs = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position",
+                            font_size = 15, position = "center") %>% 
+  kableExtra::kable_paper(full_width = F)   
+```
+
+```{r, echo=TRUE, eval=FALSE}
+print(subset(susie.res$results, SNP.PP.H4.abf > 0.05))
+```
+
+```{r}
+susie.res$results %>% 
+  filter(SNP.PP.H4.abf > 0.05) %>% 
+  kable(booktabs = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position",
+                            font_size = 15, position = "center") %>% 
+  kableExtra::kable_paper("hover", full_width = F)   
+
+```
+
+Realizamos análisis de sensibilidad con los cuales graficaremos las señales que queremos considerar. Para eso, graficaremos **Manhattan plots** y **probabilidades** para cada señal.
+
+```{r, echo=TRUE, fig.align='center', warning=TRUE}
+sensitivity(susie.res, "H4 > 0.9", row=1, dataset1 = eqtl.d2, dataset2 = gwas.d2)
+```
+
+------------------------------------------------------------------------
+
+####################################### 
+
+## 7. Guardamos los resultados y gráficas de nuestros análisis
+
+####################################### 
+
+Basado en el método de _P-values_: 
+
+-   Guardamos los resultados si **H4** tiene la probabilidad posterior más alta. 
+-   Guardamos los resultados si los valores del SNP.PP.H4 \>0.01. 
+-   Guardamos el gráfico `coloc.abf`.
+
+```{r, echo=TRUE, eval=FALSE}
+
+# Generamos un algoritmo condicional IF-ELSE
+
+# Queremos probar si PP.H4.abf es igual al valor máximo de los resultados -1.
+if(my.res$summary['PP.H4.abf'] == max(my.res$summary[-1])) { 
+  
+  # En caso de que se cumpla el criterio, guardamos los resultados. 
+	write.table(my.res$summary,
+	            paste0(trait1, '.', trait2, '.coloc_abf_gene.pval.txt'),
+	            col.names=T, row.names=F, sep='\t', quote=F)
+  
+  # Guardamos todos los valores cuyo SNP.PP.H4 sea mayor a 0.01.  
+	write.table(subset(my.res$results,SNP.PP.H4>0.01),
+	            paste0(trait1, '.', trait2, '.coloc_abf_snp.pval.txt'), 
+	            col.names=T, row.names=F, sep='\t', quote=F)
+	}
+
+# Generamos un archivo `.png` donde se guarde el grpafico. 
+png("Height.eqtl.coloc_pvalues.png")
+plot(my.res)
+dev.off()
+
+```
+
+
+```{r, eval=FALSE}
+# Real input
+if(my.res$summary['PP.H4.abf'] == max(my.res$summary[-1])) {
+	write.table(
+	  my.res.bvar$summary,
+	  here("Data", "Output", paste0(trait1,'.',trait2,'.coloc_abf_gene.pval.txt')),
+	  col.names=T, row.names=F, sep='\t', quote=F)
+  
+	write.table(
+	  subset(my.res.bvar$results, SNP.PP.H4 > 0.01),
+	  here("Data", "Output", paste0(trait1,'.',trait2,'.coloc_abf_snp.pval.txt')), 
+	  col.names=T, row.names=F, sep='\t', quote=F)
+	}
+
+plot(my.res.bvar)
+ggsave(here("Data", "Plots", "Height.eqtl.coloc_pvalues.png"))
+dev.off()
+
+```
+
+Basado en el método de _Betas_ $\beta$:
+
+-   Guardamos los resultados si **H4** tiene la probabilidad posterior más alta. 
+-   Guardamos los resultados si los valores del SNP.PP.H4 \>0.01. 
+-   Guardamos el gráfico `coloc.abf`.
+
+```{r, echo=TRUE, eval=FALSE}
+
+if(my.res.bvar$summary['PP.H4.abf'] == max(my.res.bvar$summary[-1])) {
+    write.table(
+      my.res.bvar$summary, 
+      paste0(trait1, '.', trait2, '.coloc_abf_gene.betas.txt'), 
+      col.names=T, row.names=F, sep='\t', quote=F)
+  
+    write.table(
+      subset(my.res.bvar$results, SNP.PP.H4 > 0.01),
+      paste0(trait1, '.', trait2, '.coloc_abf_snp.betas.txt'), 
+      col.names=T, row.names=F, sep='\t', quote=F)
+    }
+
+png("Height.eqtl.coloc_betas.png")
+plot(my.res.bvar)
+dev.off()
+
+```
+
+```{r, eval=FALSE}
+
+if( my.res.bvar$summary['PP.H4.abf'] == max(my.res.bvar$summary[-1])) {
+	write.table(
+	  my.res.bvar$summary,
+	  here("Data", "Output", paste0(trait1,'.',trait2,'.coloc_abf_gene.betas.txt')),
+	  col.names=T, row.names=F, sep='\t', quote=F)
+  
+	write.table(
+	  subset(my.res.bvar$results, SNP.PP.H4 > 0.01),
+	  here("Data", "Output", paste0(trait1,'.',trait2,'.coloc_abf_snp.betas.txt')), 
+	  col.names=T, row.names=F, sep='\t', quote=F)
+	}
+
+plot(my.res.bvar)
+ggsave(here("Data", "Plots", "Height.eqtl.coloc_betas.png"))
+dev.off()
+```
+
+Basado en el método _SuSiE_ :
+
+-   Guardamos los resultados si **H4** tiene la probabilidad posterior más alta, `coloc-susie` (\>1 causal variant).
+-   Guardamos los resultados si los valores del SNP.PP.H4 \>0.01, `coloc-susie` (\>1 causal variant).
+-   Guardamos los gráficos de cada data set que incluyan los resultados de `runsusie`.
+-   Guardamos los Manhattan-plots y probabilidades de cada señal.
+
+```{r, echo=TRUE, eval=FALSE}
+
+write.table(susie.res$summary, 
+            paste0(trait1, '.', trait2, '.coloc_susie_abf_gene.txt'),
+            col.names=T, row.names=F, sep='\t', quote=F)
+
+write.table(subset(susie.res$results, SNP.PP.H4.abf > 0.01),
+            paste0(trait1, '.', trait2, '.coloc_susie_abf_snp.txt'),
+            col.names=T, row.names=F, sep='\t', quote=F)
+
+png("Height.gwas.susie_obj.png")
+plot_dataset(gwas.d2,susie_obj=gwas.s,color = c("green4"))
+dev.off()
+
+png("Height.eqtl.susie_obj.png")
+plot_dataset(eqtl.d2,susie_obj=eqtl.s,color = c("yellow4"))
+dev.off()
+
+png("Height.gwas.eqtl.susie_probs.png")
+sensitivity(susie.res,"H4 > 0.9", 
+            row=1, 
+            dataset1 = eqtl.d2, 
+            dataset2 = gwas.d2)
+dev.off()
+
+
+```
+
+```{r, eval=FALSE}
+
+# Data sets
+write.table(susie.res$summary, 
+            here("Data", "Output", paste0(trait1, '.', trait2, '.coloc_susie_abf_gene.txt')),
+            col.names=T, row.names=F, sep='\t', quote=F)
+
+write.table(subset(susie.res$results, SNP.PP.H4.abf > 0.01),
+            here("Data", "Output", paste0(trait1, '.', trait2, '.coloc_susie_abf_snp.txt')),
+            col.names=T, row.names=F, sep='\t', quote=F)
+
+# Plots
+
+plot_dataset(gwas.d2,susie_obj=gwas.s,color = c("green4"))
+ggsave(here("Data", "Plots", "Height.gwas.susie_obj.png"))
+
+plot_dataset(eqtl.d2,susie_obj=eqtl.s,color = c("yellow4"))
+ggsave(here("Data", "Plots", "Height.eqtl.susie_obj.png"))
+
+sensitivity(susie.res,"H4 > 0.9", row = 1, 
+            dataset1 = eqtl.d2, 
+            dataset2 = gwas.d2)
+ggsave(here("Data", "Plots", "Height.gwas.eqtl.susie_probs.png"))
+
+```
+
+`r sprintf("<span class='custom-inline'>%s</span>", "Workshop de Colocalización genética. Código y documento original, Misa Graff. Traducción,  Carlos González-Carballo. Unidad de Investigación en Medicina Experimental, UNAM.")`
