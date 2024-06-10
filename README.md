@@ -6,8 +6,6 @@ La colocalización genética es un método estadístico que identifica factores 
 
 Contacto: 
 
-[hientran\@clientdiary.com](mailto:hientran@clientdiary.com?subject=Test)
-
 -   Misa Graff, [migraff\@email.unc.edu](mailto:migraff@email.unc.edu?subject=Colocalization)
 -   Fernando Rivas, [fenandos\@hotmail.com](mailto:carlos.gz.cb@gmail.com?subject=Colocalization)
 -   Carlos González-Carballo, [carlos.gz.cb\@gmail.com](mailto:fenandos@hotmail.com?subject=Colocalization)
